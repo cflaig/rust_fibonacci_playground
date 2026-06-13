@@ -1,6 +1,6 @@
 use std::fmt::Display;
-use std::ops::Add;
-use crate::fib::FibNum;
+use std::ops::{Add, AddAssign};
+use crate::fib::{FibNum, FibNumInplace};
 
 
 #[derive(Clone)]
@@ -16,6 +16,9 @@ impl FibNum for DynBigUint {
     fn one() -> Self {
         DynBigUint::new(1)
     }
+}
+
+impl FibNumInplace for DynBigUint {
 }
 
 impl Display for DynBigUint {
@@ -52,18 +55,13 @@ impl Add for &DynBigUint {
 
     fn add(self, other: &DynBigUint) -> DynBigUint {
         let max = self.limbs.max(other.limbs);
-        let limbs = if self.check_if_overflows(other)  { max + 1 } else { max };
+        let limbs = if self.check_if_overflows(other) { max + 1 } else { max };
 
         let mut result = DynBigUint::new_with_limbs(0, limbs);
         let mut carry = false;
+
         for i in 0..self.limbs.min(other.limbs) {
-            if carry {
-                result.values[i] += 1;
-            }
-            let (sum, c1) = result.values[i].overflowing_add(self.values[i]);
-            let (sum, c2) = sum.overflowing_add(other.values[i]);
-            result.values[i] = sum;
-            carry = c1 || c2;
+            (result.values[i], carry) = self.values[i].carrying_add(other.values[i], carry);
         }
         carry = add_remaining_array(self, &mut result, self.limbs.min(other.limbs), self.limbs, carry);
         carry = add_remaining_array(other, &mut result, self.limbs.min(other.limbs), other.limbs, carry);
@@ -74,14 +72,35 @@ impl Add for &DynBigUint {
     }
 }
 
+impl AddAssign<&DynBigUint> for DynBigUint {
+fn add_assign(&mut self, other: &DynBigUint) {
+    let mut carry = false;
+
+    for i in 0..self.limbs.min(other.limbs) {
+        (self.values[i], carry) = self.values[i].carrying_add(other.values[i], carry);
+    }
+    if self.limbs > other.limbs {
+        for i in self.limbs.min(other.limbs)..self.limbs {
+            (self.values[i], carry) = self.values[i].carrying_add(0u64, carry);
+        }
+    } else {
+        for i in self.limbs.min(other.limbs)..other.limbs {
+            let sum;
+            (sum, carry) = other.values[i].carrying_add(0u64, carry);
+            self.values.push(sum);
+            self.limbs += 1;
+        }
+    }
+    if carry {
+        self.values.push(1);
+        self.limbs += 1;
+    }
+    }
+}
+
     fn add_remaining_array(a: &DynBigUint, r: &mut DynBigUint, min: usize, max: usize, mut carry: bool) -> bool {
         for i in min..max {
-            if carry {
-                r.values[i] += 1;
-            }
-            let (sum, c1) = r.values[i].overflowing_add(a.values[i]);
-            r.values[i] = sum;
-            carry = c1;
+            (r.values[i], carry) = r.values[i].carrying_add(a.values[i], carry);
         }
         carry
     }

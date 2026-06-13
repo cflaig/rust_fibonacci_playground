@@ -19,28 +19,35 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 }
 
 fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
-    let mut two_values_timings = Vec::new();
-    let mut dyn_two_values_timings = Vec::new();
-    let mut opt_two_values_timings = Vec::new();
+    let mut big_timings = Vec::new();
+    let mut dyn_timings = Vec::new();
+    let mut opt_timings = Vec::new();
+    let mut dyn_ip_timings = Vec::new();
+    let mut opt_ip_timings = Vec::new();
 
-    for n in (1..=400_000).step_by(400) {
+    for n in (1..=700_000u32).step_by(700) {
         let start = Instant::now();
         fib::fib_two_values::<BigUint>(n);
-        let elapsed = start.elapsed().as_micros();
-        two_values_timings.push((n, elapsed));
+        big_timings.push((n, start.elapsed().as_micros()));
 
         let start = Instant::now();
         fib::fib_two_values::<DynBigUint>(n);
-        let elapsed = start.elapsed().as_micros();
-        dyn_two_values_timings.push((n, elapsed));
+        dyn_timings.push((n, start.elapsed().as_micros()));
 
         let start = Instant::now();
         fib::fib_two_values::<OptBigUint>(n);
-        let elapsed = start.elapsed().as_micros();
-        opt_two_values_timings.push((n, elapsed));
+        opt_timings.push((n, start.elapsed().as_micros()));
+
+        let start = Instant::now();
+        fib::fib_inplace_two_values::<DynBigUint>(n);
+        dyn_ip_timings.push((n, start.elapsed().as_micros()));
+
+        let start = Instant::now();
+        fib::fib_inplace_two_values::<OptBigUint>(n);
+        opt_ip_timings.push((n, start.elapsed().as_micros()));
     }
 
-    plot_timings(&two_values_timings, &dyn_two_values_timings, &opt_two_values_timings)?;
+    plot_timings(&big_timings, &dyn_timings, &opt_timings, &dyn_ip_timings, &opt_ip_timings)?;
     println!("Zeitmessung wurde in timings.svg geplottet");
 
     Ok(())
@@ -49,26 +56,27 @@ fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
 #[cfg(test)]
 mod tests {
     use std::time::Instant;
-    use crate::fib::{self, FibNum};
+    use crate::fib;
 
-    fn max_fib_in_one_second<T: FibNum>() -> u32
-    where
-        for<'a> &'a T: std::ops::Add<&'a T, Output = T>,
-    {
+    fn max_fib_in_one_second(fib_fn: impl Fn(u32), max_n: Option<u32>) -> u32 {
         let mut n = 1u32;
         loop {
             let start = Instant::now();
-            fib::fib_two_values::<T>(n);
+            fib_fn(n);
             if start.elapsed().as_secs_f64() >= 1.0 {
                 break;
             }
-            n = n.saturating_mul(2);
+            match max_n {
+                Some(max) if n >= max => break,
+                Some(max) => n = n.saturating_mul(2).min(max),
+                None => n = n.saturating_mul(2),
+            }
         }
         let (mut lo, mut hi) = (n / 2, n);
         while hi - lo > 1 {
             let mid = lo + (hi - lo) / 2;
             let start = Instant::now();
-            fib::fib_two_values::<T>(mid);
+            fib_fn(mid);
             if start.elapsed().as_secs_f64() >= 1.0 {
                 hi = mid;
             } else {
@@ -82,80 +90,75 @@ mod tests {
     fn test_max_fib_one_second() {
         use crate::biguint::BigUint;
         use crate::dynbiguint::DynBigUint;
-        let n_big = max_fib_in_one_second::<BigUint>();
+        use crate::optbiguint::OptBigUint;
+
+        let n_big = max_fib_in_one_second(|n| { fib::fib_two_values::<BigUint>(n); }, Some(700_000));
         println!("BigUint:    max fib in <1s = fib({})", n_big);
-        let n_dyn = max_fib_in_one_second::<DynBigUint>();
+        let n_dyn = max_fib_in_one_second(|n| { fib::fib_two_values::<DynBigUint>(n); }, None);
         println!("DynBigUint: max fib in <1s = fib({})", n_dyn);
-        let n_opt = max_fib_in_one_second::<crate::optbiguint::OptBigUint>();
+        let n_opt = max_fib_in_one_second(|n| { fib::fib_two_values::<OptBigUint>(n); }, Some(700_000));
         println!("OptBigUint: max fib in <1s = fib({})", n_opt);
+        let n_dyn_ip = max_fib_in_one_second(|n| { fib::fib_inplace_two_values::<DynBigUint>(n); }, None);
+        println!("DynBigUint (ip): max fib in <1s = fib({})", n_dyn_ip);
+        let n_opt_ip = max_fib_in_one_second(|n| { fib::fib_inplace_two_values::<OptBigUint>(n); }, Some(700_000));
+        println!("OptBigUint (ip): max fib in <1s = fib({})", n_opt_ip);
     }
 }
 
 fn plot_timings(
-    two_values_timings: &[(u32, u128)],
-    dyn_two_values_timings: &[(u32, u128)],
-    opt_two_values_timings: &[(u32, u128)],
+    big_timings: &[(u32, u128)],
+    dyn_timings: &[(u32, u128)],
+    opt_timings: &[(u32, u128)],
+    dyn_ip_timings: &[(u32, u128)],
+    opt_ip_timings: &[(u32, u128)],
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let all = [big_timings, dyn_timings, opt_timings, dyn_ip_timings, opt_ip_timings];
+
+    let max_n = all.iter().flat_map(|s| s.iter()).map(|(n, _)| *n).max().unwrap_or(1);
+    let max_ms = all.iter().flat_map(|s| s.iter()).map(|(_, us)| *us as f64 / 1000.0)
+        .fold(0f64, f64::max);
+
+    let to_ms = |data: &[(u32, u128)]| {
+        data.iter().map(|(n, us)| (*n, *us as f64 / 1000.0)).collect::<Vec<_>>()
+    };
+
+    let col_big    = RGBColor(34,  139,  34);   // Waldgrün
+    let col_dyn    = RGBColor(214, 102,  21);   // Orange
+    let col_opt    = RGBColor(70,  130, 180);   // Stahlblau
+    let col_dyn_ip = RGBColor(148,  52, 186);   // Violett
+    let col_opt_ip = RGBColor(0,   160, 136);   // Türkis
+
     let root = SVGBackend::new("timings.svg", (1280, 720)).into_drawing_area();
     root.fill(&WHITE)?;
 
-    let max_n = two_values_timings
-        .iter()
-        .chain(dyn_two_values_timings)
-        .chain(opt_two_values_timings)
-        .map(|(n, _)| *n)
-        .max()
-        .unwrap_or(1);
-    let max_time = two_values_timings
-        .iter()
-        .chain(dyn_two_values_timings)
-        .chain(opt_two_values_timings)
-        .map(|(_, elapsed)| *elapsed as u64)
-        .max()
-        .unwrap_or(1);
-
     let mut chart = ChartBuilder::on(&root)
-        .caption("Fibonacci-Zeitmessung", ("sans-serif", 40))
+        .caption("Fibonacci-Zeitmessung", ("sans-serif", 36))
         .margin(20)
         .x_label_area_size(40)
         .y_label_area_size(80)
-        .build_cartesian_2d(1u32..max_n, 0u64..max_time)?;
+        .build_cartesian_2d(1u32..max_n, 0f64..max_ms * 1.05)?;
 
     chart
         .configure_mesh()
         .x_desc("n")
-        .y_desc("Zeit in µs")
+        .y_desc("Zeit in ms")
+        .y_label_formatter(&|v| format!("{:.1}", v))
         .draw()?;
 
-    chart
-        .draw_series(LineSeries::new(
-            two_values_timings
-                .iter()
-                .map(|(n, elapsed)| (*n, *elapsed as u64)),
-            GREEN,
-        ))?
-        .label("Two Values (BigUint)")
-        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], GREEN));
+    macro_rules! draw {
+        ($data:expr, $label:expr, $color:expr) => {
+            chart
+                .draw_series(LineSeries::new(to_ms($data), $color))?
+                .label($label)
+                .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], $color));
+        };
+    }
 
-    chart
-        .draw_series(LineSeries::new(
-            dyn_two_values_timings
-                .iter()
-                .map(|(n, elapsed)| (*n, *elapsed as u64)),
-            &MAGENTA,
-        ))?
-        .label("Two Values (DynBigUint)")
-        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], MAGENTA));
-
-    chart
-        .draw_series(LineSeries::new(
-            opt_two_values_timings
-                .iter()
-                .map(|(n, elapsed)| (*n, *elapsed as u64)),
-            BLUE,
-        ))?
-        .label("Two Values (OptBigUint)")
-        .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], BLUE));
+    draw!(big_timings,    "BigUint",         col_big);
+    draw!(dyn_timings,    "DynBigUint",      col_dyn);
+    draw!(opt_timings,    "OptBigUint",      col_opt);
+    draw!(dyn_ip_timings, "DynBigUint (ip)", col_dyn_ip);
+    draw!(opt_ip_timings, "OptBigUint (ip)", col_opt_ip);
 
     chart
         .configure_series_labels()

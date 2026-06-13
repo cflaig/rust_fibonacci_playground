@@ -1,8 +1,11 @@
-use std::ops::Add;
+use std::mem::swap;
+use std::ops::{Add, AddAssign};
 
 pub trait FibNum: Add<Output = Self> + Clone {
     fn zero() -> Self;
     fn one() -> Self;
+}
+pub trait FibNumInplace: FibNum + for<'a> AddAssign<&'a Self> {
 }
 
 fn fib_recursive(n: u32) -> u128 {
@@ -64,16 +67,28 @@ where
     b
 }
 
+pub fn fib_inplace_two_values<T: FibNumInplace>(n: u32) -> T
+{
+    let mut a = Box::new(T::one());
+    let mut b = Box::new(T::one());
+
+    for _ in 3..=n {
+        (&mut *a).add_assign(&b);
+        swap(&mut b, &mut a);
+    }
+    *b
+}
+
 #[cfg(test)]
 mod tests {
     use crate::biguint::BigUint;
     use crate::dynbiguint::DynBigUint;
-    use crate::fib::fib_two_values;
+    use crate::fib::{fib_inplace_two_values, fib_two_values};
     use crate::optbiguint::OptBigUint;
 
     #[test]
     fn test_big_uint_dynuint() {
-        for i in 1..9000 {
+        for i in 1..1000 {
             let x = fib_two_values::<BigUint>(i);
             let y = fib_two_values::<DynBigUint>(i);
             assert_eq!(x.to_string(), y.to_string());
@@ -87,5 +102,37 @@ mod tests {
             let y = fib_two_values::<OptBigUint>(i);
             assert_eq!(x.to_string(), y.to_string());
         }
+    }
+
+    #[test]
+    fn test_fib_inplace() {
+        for i in 1..1000 {
+            let x = fib_two_values::<OptBigUint>(i);
+            let y = fib_inplace_two_values::<DynBigUint>(i);
+            assert_eq!(x.to_string(), y.to_string());
+        }
+    }
+
+    #[test]
+    fn test_fib_inplace_optbigunit() {
+        for i in 1..1000 {
+            let x = fib_inplace_two_values::<OptBigUint>(i);
+            let y = fib_inplace_two_values::<DynBigUint>(i);
+            assert_eq!(x.to_string(), y.to_string());
+        }
+    }
+
+    #[test]
+    fn test_biguint_fib_700000() {
+        let x = fib_two_values::<BigUint>(700_000);
+        let y = fib_two_values::<DynBigUint>(700_000);
+        assert_eq!(x.to_string(), y.to_string());
+    }
+
+    #[test]
+    fn test_optbiguint_fib_700000() {
+        let x = fib_two_values::<OptBigUint>(700_000);
+        let y = fib_two_values::<DynBigUint>(700_000);
+        assert_eq!(x.to_string(), y.to_string());
     }
 }

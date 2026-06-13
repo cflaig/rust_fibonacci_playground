@@ -1,8 +1,8 @@
 use std::fmt::Display;
-use std::ops::Add;
-use crate::fib::FibNum;
+use std::ops::{Add, AddAssign};
+use crate::fib::{FibNum, FibNumInplace};
 
-const LIMBS: usize = 4400;
+const LIMBS: usize = 7600;
 
 #[derive(Clone)]
 pub struct OptBigUint {
@@ -17,6 +17,9 @@ impl FibNum for OptBigUint {
     fn one() -> Self {
         OptBigUint::new(1)
     }
+}
+
+impl FibNumInplace for OptBigUint {
 }
 
 impl Display for OptBigUint {
@@ -58,12 +61,33 @@ impl Add for &OptBigUint {
         result.limbs = limbs;
         let mut carry = false;
         for i in 0..LIMBS.min(limbs) {
-            let (sum, c1) = self.values[i].overflowing_add(other.values[i]);
-            let (sum, c2)   = sum.overflowing_add(carry as u64);
-            result.values[i] = sum;
-            carry = c1 || c2;
+            (result.values[i], carry) = self.values[i].carrying_add(other.values[i], carry);
         }
         result
+    }
+}
+
+impl AddAssign<&OptBigUint> for OptBigUint {
+    fn add_assign(&mut self, other: &OptBigUint) {
+        let mut carry = false;
+        for i in 0..LIMBS.min(self.limbs.min(other.limbs)) {
+            (self.values[i], carry) = self.values[i].carrying_add(other.values[i], carry);
+        }
+        if self.limbs > other.limbs {
+            for i in self.limbs.min(other.limbs)..self.limbs {
+                (self.values[i], carry) = self.values[i].carrying_add(0u64, carry);
+            }
+        } else {
+            for i in self.limbs.min(other.limbs)..other.limbs {
+                (self.values[i], carry) = other.values[i].carrying_add(0u64, carry);
+                self.limbs += 1;
+            }
+        }
+
+        if carry {
+            self.values[self.limbs] = 1;
+            self.limbs += 1;
+        }
     }
 }
 

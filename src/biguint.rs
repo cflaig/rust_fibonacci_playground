@@ -2,7 +2,7 @@ use std::fmt::Display;
 use std::ops::Add;
 use crate::fib::FibNum;
 
-const LIMBS: usize = 4400;
+const LIMBS: usize = 7600;
 
 #[derive(Clone)]
 pub struct BigUint {
@@ -54,13 +54,7 @@ impl Add for &BigUint {
         let mut result = BigUint::new(0);
         let mut carry = false;
         for i in 0..LIMBS {
-            if carry {
-                result.values[i] += 1;
-            }
-            let (sum, c1) = result.values[i].overflowing_add(self.values[i]);
-            let (sum, c2) = sum.overflowing_add(other.values[i]);
-            result.values[i] = sum;
-            carry = c1 || c2;
+            (result.values[i], carry) = self.values[i].carrying_add(other.values[i], carry);
         }
         result
     }
