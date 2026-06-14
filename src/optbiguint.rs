@@ -1,12 +1,12 @@
+use crate::fib::{FibNum, FibNumInplace};
 use std::fmt::Display;
 use std::ops::{Add, AddAssign};
-use crate::fib::{FibNum, FibNumInplace};
 
 const LIMBS: usize = 7600;
 
 #[derive(Clone)]
 pub struct OptBigUint {
-    values: [u64;LIMBS],
+    values: [u64; LIMBS],
     limbs: usize,
 }
 
@@ -19,8 +19,7 @@ impl FibNum for OptBigUint {
     }
 }
 
-impl FibNumInplace for OptBigUint {
-}
+impl FibNumInplace for OptBigUint {}
 
 impl Display for OptBigUint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -31,7 +30,7 @@ impl Display for OptBigUint {
         while !n.is_zero() {
             (n, rem) = n.div_rem(big_ten);
             if n.is_zero() {
-            buffer.push(rem.to_string());
+                buffer.push(rem.to_string());
             } else {
                 buffer.push(format!("{:019}", rem));
             }
@@ -56,7 +55,11 @@ impl Add for &OptBigUint {
 
     fn add(self, other: &OptBigUint) -> OptBigUint {
         let max = self.limbs.max(other.limbs);
-        let limbs = if self.check_if_overflows(other)  { max + 1 } else { max };
+        let limbs = if self.check_if_overflows(other) {
+            max + 1
+        } else {
+            max
+        };
         let mut result = OptBigUint::new(0);
         result.limbs = limbs;
         let mut carry = false;
@@ -109,7 +112,7 @@ impl OptBigUint {
         let mut remainder = 0u64;
         for i in (0..self.limbs).rev() {
             let div = ((remainder as u128) << 64) + self.values[i] as u128;
-            let (a,b) = (div / d as u128, div % d as u128);
+            let (a, b) = (div / d as u128, div % d as u128);
             result.values[i] = a as u64;
             remainder = b as u64;
         }
@@ -117,17 +120,16 @@ impl OptBigUint {
     }
 
     fn check_if_overflows(&self, other: &OptBigUint) -> bool {
-        let (sum, carry) =
-            match self.limbs.cmp(&other.limbs) {
-                std::cmp::Ordering::Greater => {(self.values[self.limbs -1 ], false)},
-                std::cmp::Ordering::Less => {(other.values[other.limbs -1 ], false)}
-                std::cmp::Ordering::Equal =>
-                    self.values[self.limbs -1 ].overflowing_add(other.values[other.limbs -1]),
-            };
+        let (sum, carry) = match self.limbs.cmp(&other.limbs) {
+            std::cmp::Ordering::Greater => (self.values[self.limbs - 1], false),
+            std::cmp::Ordering::Less => (other.values[other.limbs - 1], false),
+            std::cmp::Ordering::Equal => {
+                self.values[self.limbs - 1].overflowing_add(other.values[other.limbs - 1])
+            }
+        };
         let (_, carry2) = sum.overflowing_add(1u64);
         carry || carry2
     }
-
 }
 
 #[cfg(test)]

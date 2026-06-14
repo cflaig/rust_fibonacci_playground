@@ -1,12 +1,13 @@
+use crate::fib::FibNum;
 use std::fmt::Display;
 use std::ops::Add;
-use crate::fib::FibNum;
+use std::ops::Mul;
 
 const LIMBS: usize = 7600;
 
 #[derive(Clone)]
 pub struct BigUint {
-    values: [u64;LIMBS]
+    values: [u64; LIMBS],
 }
 
 impl FibNum for BigUint {
@@ -27,7 +28,7 @@ impl Display for BigUint {
         while !n.is_zero() {
             (n, rem) = n.div_rem(big_ten);
             if n.is_zero() {
-            buffer.push(rem.to_string());
+                buffer.push(rem.to_string());
             } else {
                 buffer.push(format!("{:019}", rem));
             }
@@ -60,6 +61,27 @@ impl Add for &BigUint {
     }
 }
 
+impl Mul for &BigUint {
+    type Output = BigUint;
+
+    fn mul(self, other: &BigUint) -> BigUint {
+        let mut result = BigUint::new(0);
+        let mut carry = 0u64;
+        for i in 0..LIMBS {
+            for j in 0..LIMBS {
+                if j + i < LIMBS {
+                    (result.values[j + i], carry) = self.values[i].carrying_mul_add(
+                        other.values[j],
+                        carry,
+                        result.values[j + i],
+                    );
+                }
+            }
+        }
+        result
+    }
+}
+
 impl BigUint {
     const fn new(value: u64) -> Self {
         let mut values = [0; LIMBS];
@@ -76,13 +98,12 @@ impl BigUint {
         let mut remainder = 0u64;
         for i in (0..LIMBS).rev() {
             let div = ((remainder as u128) << 64) + self.values[i] as u128;
-            let (a,b) = (div / d as u128, div % d as u128);
+            let (a, b) = (div / d as u128, div % d as u128);
             result.values[i] = a as u64;
             remainder = b as u64;
         }
         (result, remainder)
     }
-
 }
 
 #[cfg(test)]
