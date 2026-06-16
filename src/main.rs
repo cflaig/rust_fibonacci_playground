@@ -280,6 +280,7 @@ fn plot_dyn_vs_matrix(
 
 #[cfg(test)]
 mod tests {
+    use crate::dynbiguint::{StandardMul, UnrolledMul};
     use crate::fib;
     use std::time::Instant;
 
@@ -361,10 +362,20 @@ mod tests {
         println!("DynBigUint (matrix): max fib in <1s = fib({})", n_mat_dyn);
         let n_mat_dyn = max_fib_in_one_second(
             |n| {
-                fib::fib_matrix_mult_2::<DynBigUint>(n);
+                fib::fib_matrix_mult_2::<DynBigUint<StandardMul>>(n);
             },
             None,
         );
         println!("DynBigUint (matrix 2): max fib in <1s = fib({})", n_mat_dyn);
+        let n_mat_dyn = max_fib_in_one_second(
+            |n| {
+                fib::fib_matrix_mult_2::<DynBigUint<UnrolledMul>>(n);
+            },
+            None,
+        );
+        println!(
+            "DynBigUint (matrix 2 unrolled): max fib in <1s = fib({})",
+            n_mat_dyn
+        );
     }
 }
