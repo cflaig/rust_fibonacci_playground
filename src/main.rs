@@ -359,5 +359,12 @@ mod tests {
             None,
         );
         println!("DynBigUint (matrix): max fib in <1s = fib({})", n_mat_dyn);
+        let n_mat_dyn = max_fib_in_one_second(
+            |n| {
+                fib::fib_matrix_mult_2::<DynBigUint>(n);
+            },
+            None,
+        );
+        println!("DynBigUint (matrix 2): max fib in <1s = fib({})", n_mat_dyn);
     }
 }
