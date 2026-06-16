@@ -5,7 +5,6 @@ use std::ops::{Add, AddAssign, Mul};
 #[derive(Clone)]
 pub struct DynBigUint {
     values: Vec<u64>,
-    limbs: usize,
 }
 
 impl FibNum for DynBigUint {
@@ -52,17 +51,10 @@ impl Add for &DynBigUint {
     type Output = DynBigUint;
 
     fn add(self, other: &DynBigUint) -> DynBigUint {
-        let max = self.limbs.max(other.limbs);
-        let limbs = if self.check_if_overflows(other) {
-            max + 1
-        } else {
-            max
-        };
-
-        let mut result = DynBigUint::new_with_limbs(0, limbs);
+        let mut result = DynBigUint::new_with_limbs(0, self.values.len().max(other.values.len()));
         let mut carry = false;
 
-        let min = self.limbs.min(other.limbs);
+        let min = self.values.len().min(other.values.len());
         let a = &self.values[0..min];
         let b = &other.values[0..min];
         let r = &mut result.values[0..min];
@@ -72,19 +64,19 @@ impl Add for &DynBigUint {
         carry = add_remaining_array(
             self,
             &mut result,
-            self.limbs.min(other.limbs),
-            self.limbs,
+            min,
+            self.values.len(),
             carry,
         );
         carry = add_remaining_array(
             other,
             &mut result,
-            self.limbs.min(other.limbs),
-            other.limbs,
+            min,
+            other.values.len(),
             carry,
         );
         if carry {
-            result.values[result.limbs - 1] += 1;
+            result.values.push(1);
         }
         result
     }
@@ -94,27 +86,25 @@ impl AddAssign<&DynBigUint> for DynBigUint {
     fn add_assign(&mut self, other: &DynBigUint) {
         let mut carry = false;
 
-        let min = self.limbs.min(other.limbs);
+        let min = self.values.len().min(other.values.len());
         let a = &mut self.values[0..min];
         let b = &other.values[0..min];
         for (a, b) in a.iter_mut().zip(b.iter()) {
             (*a, carry) = a.carrying_add(*b, carry);
         }
-        if self.limbs > other.limbs {
-            for i in self.limbs.min(other.limbs)..self.limbs {
+        if self.values.len() > other.values.len() {
+            for i in min..self.values.len() {
                 (self.values[i], carry) = self.values[i].carrying_add(0u64, carry);
             }
         } else {
-            for i in self.limbs.min(other.limbs)..other.limbs {
+            for i in min..other.values.len() {
                 let sum;
                 (sum, carry) = other.values[i].carrying_add(0u64, carry);
                 self.values.push(sum);
-                self.limbs += 1;
             }
         }
         if carry {
             self.values.push(1);
-            self.limbs += 1;
         }
     }
 }
@@ -136,21 +126,20 @@ impl Mul for &DynBigUint {
     type Output = DynBigUint;
 
     fn mul(self, other: &DynBigUint) -> DynBigUint {
-        let mut result = DynBigUint::new_with_limbs(0, self.limbs + other.limbs);
-        for i in 0..self.limbs {
+        let mut result = DynBigUint::new_with_limbs(0, self.values.len() + other.values.len());
+        for i in 0..self.values.len() {
             let mut carry = 0u64;
-            for j in 0..other.limbs {
+            for j in 0..other.values.len() {
                 (result.values[j + i], carry) =
                     self.values[i].carrying_mul_add(other.values[j], carry, result.values[j + i]);
             }
             if carry != 0 {
-                result.values[other.limbs + i] = carry;
+                result.values[other.values.len() + i] = carry;
             }
         }
 
-        while result.limbs > 1 && result.values[result.limbs - 1] == 0 {
+        while result.values.len() > 1 && result.values[result.values.len() - 1] == 0 {
             result.values.pop();
-            result.limbs -= 1;
         }
         result
     }
@@ -158,37 +147,23 @@ impl Mul for &DynBigUint {
 
 impl DynBigUint {
     fn new(value: u64) -> Self {
-        let mut values = vec![0; 1];
-        values[0] = value;
-        DynBigUint { values, limbs: 1 }
+        DynBigUint { values: vec![value] }
     }
 
     fn new_with_limbs(value: u64, limbs: usize) -> Self {
         let mut values = vec![0; limbs];
         values[0] = value;
-        DynBigUint { values, limbs }
+        DynBigUint { values }
     }
 
     fn is_zero(&self) -> bool {
         self.values.iter().all(|&v| v == 0)
     }
 
-    fn check_if_overflows(&self, other: &DynBigUint) -> bool {
-        let (sum, carry) = match self.limbs.cmp(&other.limbs) {
-            std::cmp::Ordering::Greater => (self.values[self.limbs - 1], false),
-            std::cmp::Ordering::Less => (other.values[other.limbs - 1], false),
-            std::cmp::Ordering::Equal => {
-                self.values[self.limbs - 1].overflowing_add(other.values[other.limbs - 1])
-            }
-        };
-        let (_, carry2) = sum.overflowing_add(1u64);
-        carry || carry2
-    }
-
     fn div_rem(&self, d: u64) -> (DynBigUint, u64) {
-        let mut result = DynBigUint::new_with_limbs(0, self.limbs);
+        let mut result = DynBigUint::new_with_limbs(0, self.values.len());
         let mut remainder = 0u64;
-        for i in (0..self.limbs).rev() {
+        for i in (0..self.values.len()).rev() {
             let div = ((remainder as u128) << 64) + self.values[i] as u128;
             let (a, b) = (div / d as u128, div % d as u128);
             result.values[i] = a as u64;
