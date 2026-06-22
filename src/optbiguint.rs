@@ -138,7 +138,7 @@ mod tests {
 
     #[test]
     fn test_display_zero_padding() {
-        // 10^19 + 1: der niedrige Chunk ist 1, muss aber als "0000000000000000001" gedruckt werden
+        // 10^19 + 1: the low chunk is 1, but must be printed as "0000000000000000001"
         let a = OptBigUint::new(10_000_000_000_000_000_000u64);
         let b = OptBigUint::new(1);
         let result = (a + b).to_string();

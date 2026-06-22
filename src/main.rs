@@ -1,7 +1,9 @@
 use biguint::BigUint;
-use dynbiguint::DynBigUint;
+use dynbiguint::{DynBigUint, Karatsuba, StandardMul, UnrolledMul};
 use optbiguint::OptBigUint;
 use plotters::prelude::*;
+use plotters_bitmap::BitMapBackend;
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::io::Write;
 use std::time::Instant;
@@ -20,8 +22,7 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 }
 
 fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
-    benchmark_all_variants()?;
-    benchmark_dyn_vs_matrix()?;
+    make_animation()?;
     Ok(())
 }
 
@@ -99,7 +100,7 @@ fn benchmark_all_variants() -> Result<(), Box<dyn Error + Send + Sync>> {
         &dyn_ip_timings,
         &opt_ip_timings,
     )?;
-    println!("Zeitmessung wurde in timings.svg geplottet");
+    println!("Timings plotted to timings.svg");
     Ok(())
 }
 
@@ -127,7 +128,7 @@ fn benchmark_dyn_vs_matrix() -> Result<(), Box<dyn Error + Send + Sync>> {
     println!();
 
     plot_dyn_vs_matrix(&two_values_timings, &matrix_timings)?;
-    println!("Zeitmessung wurde in timings_dyn_vs_matrix.svg geplottet");
+    println!("Timings plotted to timings_dyn_vs_matrix.svg");
     Ok(())
 }
 
@@ -173,7 +174,7 @@ fn plot_all_variants(
     root.fill(&WHITE)?;
 
     let mut chart = ChartBuilder::on(&root)
-        .caption("Fibonacci-Zeitmessung", ("sans-serif", 36))
+        .caption("Fibonacci Timing", ("sans-serif", 36))
         .margin(20)
         .x_label_area_size(40)
         .y_label_area_size(80)
@@ -182,7 +183,7 @@ fn plot_all_variants(
     chart
         .configure_mesh()
         .x_desc("n")
-        .y_desc("Zeit in ms")
+        .y_desc("Time in ms")
         .y_label_formatter(&|v| format!("{:.1}", v))
         .draw()?;
 
@@ -249,7 +250,7 @@ fn plot_dyn_vs_matrix(
     chart
         .configure_mesh()
         .x_desc("n")
-        .y_desc("Zeit in ms")
+        .y_desc("Time in ms")
         .y_label_formatter(&|v| format!("{:.1}", v))
         .draw()?;
 
@@ -278,9 +279,220 @@ fn plot_dyn_vs_matrix(
     Ok(())
 }
 
+fn fmt_n(n: u32) -> String {
+    if n >= 1_000_000 {
+        format!("{:.2}M", n as f64 / 1e6)
+    } else if n >= 1_000 {
+        format!("{:.1}k", n as f64 / 1e3)
+    } else {
+        format!("{}", n)
+    }
+}
+
+fn make_animation() -> Result<(), Box<dyn Error + Send + Sync>> {
+    const B: f64 = 1.06;
+    const N_START: u32 = 1_00;
+    const POINTS_PER_FRAME: u32 = 80;
+    const FRAME_DELAY_CS: u32 = 10; // 10 centiseconds = 100ms = 10fps
+    const TIME_LIMIT: f64 = 1.0;
+    const Y_MAX: f64 = 1.1;
+
+    struct Algo {
+        name: &'static str,
+        color: RGBColor,
+        active: bool,
+        data: BTreeMap<u32, f64>,
+        run: Box<dyn Fn(u32)>,
+    }
+
+    let mut algos: Vec<Algo> = vec![
+        Algo {
+            name: "Recursive",
+            color: RGBColor(180, 0, 0),
+            active: true,
+            data: BTreeMap::new(),
+            run: Box::new(|n| { fib::fib_recursive(n); }),
+        },
+        Algo {
+            name: "BigUint linear",
+            color: RGBColor(34, 139, 34),
+            active: true,
+            data: BTreeMap::new(),
+            run: Box::new(|n| { fib::fib_two_values::<BigUint>(n); }),
+        },
+        Algo {
+            name: "DynBigUint linear",
+            color: RGBColor(214, 102, 21),
+            active: true,
+            data: BTreeMap::new(),
+            run: Box::new(|n| { fib::fib_two_values::<DynBigUint>(n); }),
+        },
+        Algo {
+            name: "OptBigUint linear",
+            color: RGBColor(70, 130, 180),
+            active: true,
+            data: BTreeMap::new(),
+            run: Box::new(|n| { fib::fib_two_values::<OptBigUint>(n); }),
+        },
+        Algo {
+            name: "DynBigUint inplace",
+            color: RGBColor(148, 52, 186),
+            active: true,
+            data: BTreeMap::new(),
+            run: Box::new(|n| { fib::fib_inplace_two_values::<DynBigUint>(n); }),
+        },
+        Algo {
+            name: "OptBigUint inplace",
+            color: RGBColor(0, 160, 136),
+            active: true,
+            data: BTreeMap::new(),
+            run: Box::new(|n| { fib::fib_inplace_two_values::<OptBigUint>(n); }),
+        },
+        Algo {
+            name: "DynBigUint matrix",
+            color: RGBColor(200, 160, 0),
+            active: true,
+            data: BTreeMap::new(),
+            run: Box::new(|n| { fib::fib_matrix_mult::<DynBigUint>(n); }),
+        },
+        Algo {
+            name: "Std matrix2",
+            color: RGBColor(100, 100, 200),
+            active: true,
+            data: BTreeMap::new(),
+            run: Box::new(|n| { fib::fib_matrix_mult_2::<DynBigUint<StandardMul>>(n); }),
+        },
+        Algo {
+            name: "Unrolled matrix2",
+            color: RGBColor(80, 180, 80),
+            active: true,
+            data: BTreeMap::new(),
+            run: Box::new(|n| { fib::fib_matrix_mult_2::<DynBigUint<UnrolledMul>>(n); }),
+        },
+        Algo {
+            name: "Karatsuba matrix2",
+            color: RGBColor(220, 80, 160),
+            active: true,
+            data: BTreeMap::new(),
+            run: Box::new(|n| { fib::fib_matrix_mult_2::<DynBigUint<Karatsuba>>(n); }),
+        },
+    ];
+
+    let root = BitMapBackend::gif("fib_animation.gif", (1280, 720), FRAME_DELAY_CS)?
+        .into_drawing_area();
+
+    let run_start = Instant::now();
+    let mut n_max_prev = 0u32;
+
+    for frame in 0u32.. {
+        let n_max = (N_START as f64 * B.powi(frame as i32)).round() as u32;
+
+        if algos.iter().all(|a| !a.active) {
+            break;
+        }
+
+        // New measurement points: full range for frame 0, ~80 new points for subsequent frames.
+        // A per-frame budget of 5s limits measurement time for large n.
+        const FRAME_BUDGET_SECS: f64 = 15.0;
+        let count = if frame == 0 { N_START } else { POINTS_PER_FRAME };
+        let range = n_max.saturating_sub(n_max_prev).max(1);
+        let step = (range / count).max(1);
+        let new_ns: Vec<u32> = (n_max_prev + step..=n_max).step_by(step as usize).collect();
+
+        let budget_start = Instant::now();
+        'outer: for &n in &new_ns {
+            for algo in algos.iter_mut() {
+                if !algo.active {
+                    continue;
+                }
+                // Check budget before each individual measurement (not just per n-value)
+                if frame > 0 && budget_start.elapsed().as_secs_f64() > FRAME_BUDGET_SECS {
+                    break 'outer;
+                }
+                let t = Instant::now();
+                (algo.run)(n);
+                let elapsed = t.elapsed().as_secs_f64();
+                if elapsed >= TIME_LIMIT {
+                    algo.active = false;
+                } else {
+                    algo.data.insert(n, elapsed);
+                }
+            }
+        }
+
+        // Render frame into GIF (chart must be dropped before root.present())
+        {
+            root.fill(&WHITE)?;
+
+            let mut chart = ChartBuilder::on(&root)
+                .caption(
+                    format!("Fibonacci Algorithms  (n up to {})", fmt_n(n_max)),
+                    ("sans-serif", 22),
+                )
+                .margin(20)
+                .x_label_area_size(50)
+                .y_label_area_size(65)
+                .build_cartesian_2d(0u32..n_max, 0f64..Y_MAX)?;
+
+            chart
+                .configure_mesh()
+                .x_desc("n")
+                .y_desc("Time (s)")
+                .y_label_formatter(&|v| format!("{:.1}s", v))
+                .x_label_formatter(&|v| fmt_n(*v))
+                .draw()?;
+
+            // 1s limit line
+            chart.draw_series(LineSeries::new(
+                [(0u32, TIME_LIMIT), (n_max, TIME_LIMIT)],
+                BLACK.mix(0.3).stroke_width(1),
+            ))?;
+
+            for algo in &algos {
+                if algo.data.is_empty() {
+                    continue;
+                }
+                let color = algo.color;
+                let data: Vec<(u32, f64)> =
+                    algo.data.iter().map(|(&n, &t)| (n, t)).collect();
+                chart
+                    .draw_series(LineSeries::new(data, color.stroke_width(2)))?
+                    .label(algo.name)
+                    .legend(move |(x, y)| {
+                        PathElement::new(vec![(x, y), (x + 20, y)], color.stroke_width(2))
+                    });
+            }
+
+            chart
+                .configure_series_labels()
+                .background_style(WHITE.mix(0.8))
+                .border_style(BLACK)
+                .label_font(("sans-serif", 13))
+                .draw()?;
+        }
+
+        root.present()?;
+
+        let active: Vec<&str> = algos.iter().filter(|a| a.active).map(|a| a.name).collect();
+        print!(
+            "\rFrame {:3}  n={:>10}  active={}  {:.0}s   ",
+            frame,
+            fmt_n(n_max),
+            active.len(),
+            run_start.elapsed().as_secs_f64(),
+        );
+        std::io::stdout().flush().unwrap();
+
+        n_max_prev = n_max;
+    }
+
+    println!("\nAnimation saved: fib_animation.gif");
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::dynbiguint::{StandardMul, UnrolledMul};
+    use crate::dynbiguint::{Karatsuba, StandardMul, UnrolledMul};
     use crate::fib;
     use std::time::Instant;
 
@@ -375,6 +587,16 @@ mod tests {
         );
         println!(
             "DynBigUint (matrix 2 unrolled): max fib in <1s = fib({})",
+            n_mat_dyn
+        );
+        let n_mat_dyn = max_fib_in_one_second(
+            |n| {
+                fib::fib_matrix_mult_2::<DynBigUint<Karatsuba>>(n);
+            },
+            None,
+        );
+        println!(
+            "DynBigUint (matrix 2 kat): max fib in <1s = fib({})",
             n_mat_dyn
         );
     }
