@@ -1,7 +1,7 @@
 use crate::fib::{FibNum, FibNumInplace};
 use std::fmt::Display;
 use std::marker::PhantomData;
-use std::ops::{Add, AddAssign, Mul};
+use std::ops::{Add, AddAssign, Mul, Sub};
 
 pub trait MulStrategy<T, O> {
     fn mul(lhs: T, rhs: T) -> O;
@@ -9,6 +9,41 @@ pub trait MulStrategy<T, O> {
 
 pub struct StandardMul;
 pub struct UnrolledMul;
+
+pub struct Karatsuba;
+
+impl<M> MulStrategy<&DynBigUint<M>, DynBigUint<M>> for Karatsuba {
+    fn mul(lhs: &DynBigUint<M>, other: &DynBigUint<M>) -> DynBigUint<M> {
+
+        let min = lhs.values.len().min(other.values.len());
+        if min <= 64 {
+            return UnrolledMul::mul(lhs, other);
+        }
+
+        let half = min >> 1;
+        let x0: DynBigUint<M> = DynBigUint::new_with_slice(&lhs.values[0..half]);
+        let x1: DynBigUint<M> = DynBigUint::new_with_slice(&lhs.values[half..]);
+        let y0: DynBigUint<M> = DynBigUint::new_with_slice(&other.values[0..half]);
+        let y1: DynBigUint<M> = DynBigUint::new_with_slice(&other.values[half..]);
+
+        let z0 = Karatsuba::mul(&x0, &y0);
+        let z2 = Karatsuba::mul(&x1, &y1);
+        let z3 = Karatsuba::mul(&(x0 + x1), &(y0 + y1));
+        let z1 = &(&z3 - &z2) - &z0;
+
+        let mut result = DynBigUint::new_with_limbs(0, lhs.values.len() + other.values.len() + 1);
+
+        result.copy_slice_to(&z0.values[0..], 0);
+        result.add_slice_at(&z1.values[0..], half);
+        result.add_slice_at(&z2.values[0..], 2*half);
+
+        while result.values.len() > 1 && result.values[result.values.len() - 1] == 0 {
+            result.values.pop();
+        }
+        result
+    }
+}
+
 
 impl<M> MulStrategy<&DynBigUint<M>, DynBigUint<M>> for StandardMul {
     fn mul(lhs: &DynBigUint<M>, other: &DynBigUint<M>) -> DynBigUint<M> {
@@ -166,6 +201,51 @@ impl<M> Add for &DynBigUint<M> {
     }
 }
 
+impl<M> Sub for DynBigUint<M> {
+    type Output = Self;
+
+    fn sub(self, other: DynBigUint<M>) -> DynBigUint<M> {
+        &self - &other
+    }
+}
+
+impl<M> Sub for &DynBigUint<M> {
+    type Output = DynBigUint<M>;
+
+    fn sub(self, other: &DynBigUint<M>) -> DynBigUint<M> {
+        if other.values.len() > self.values.len() {
+            panic!("Subtraction of DynBigUint with larger values array");
+        }
+        let mut result = DynBigUint::new_with_limbs(0, self.values.len());
+        let mut borrow = false;
+
+        let min = other.values.len();
+        let a = &self.values[0..];
+        let b = &other.values[0..];
+        let r = &mut result.values[0..];
+        for (r, (a, b)) in r.iter_mut().zip(a.iter().zip(b.iter())) {
+            (*r, borrow) = a.borrowing_sub(*b, borrow);
+        }
+        if self.values.len() > min {
+            let a = &self.values[min..];
+            let r = &mut result.values[min..];
+            for (r, a) in r.iter_mut().zip(a.iter()) {
+                (*r, borrow) = a.overflowing_sub(borrow as u64);
+            }
+        }
+
+        if borrow {
+            panic!("Subtraction results in a negative value");
+        }
+
+        while result.values.len() > 1 && result.values[result.values.len() - 1] == 0 {
+            result.values.pop();
+        }
+
+        result
+    }
+}
+
 impl<M> AddAssign<&DynBigUint<M>> for DynBigUint<M> {
     fn add_assign(&mut self, other: &DynBigUint<M>) {
         let mut carry = false;
@@ -234,6 +314,13 @@ impl<M> DynBigUint<M> {
         }
     }
 
+    fn new_with_slice(values: &[u64]) -> Self {
+        Self {
+            values: values.to_vec(),
+            _m: Default::default(),
+        }
+    }
+
     fn is_zero(&self) -> bool {
         self.values.iter().all(|&v| v == 0)
     }
@@ -253,11 +340,33 @@ impl<M> DynBigUint<M> {
         }
         (result, remainder)
     }
+
+    fn add_slice_at(&mut self, a: &[u64], limb_nr: usize) {
+        let r = &mut self.values[limb_nr..];
+        let mut carry = false;
+
+        for (r, a) in r.iter_mut().zip(a.iter()) {
+            (*r, carry) = r.carrying_add(*a, carry);
+        }
+        let mut pos = a.len() + limb_nr;
+        while carry {
+            (self.values[pos], carry) = self.values[pos].overflowing_add(1);
+            pos = pos + 1;
+        }
+    }
+
+    fn copy_slice_to(&mut self, a: &[u64], limb_nr: usize) {
+        let r = &mut self.values[limb_nr..];
+
+        for (r, a) in r.iter_mut().zip(a.iter()) {
+            *r= *a;
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::dynbiguint::DynBigUint;
+    use crate::dynbiguint::{DynBigUint, Karatsuba, StandardMul};
 
     #[test]
     fn test_display_zero_padding() {
@@ -267,4 +376,36 @@ mod tests {
         let result = (a + b).to_string();
         assert_eq!(result, "10000000000000000001");
     }
+
+    #[test]
+    fn test_subtraction() {
+        // 10^19 + 1: der niedrige Chunk ist 1, muss aber als "0000000000000000001" gedruckt werden
+        let a: DynBigUint = DynBigUint::new(u64::MAX - 1);
+        let b: DynBigUint = DynBigUint::new(10);
+        let c: DynBigUint = DynBigUint::new(12);
+        let tmp = a + b;
+        let d = tmp - c;
+        assert_eq!(d.to_string(),(u64::MAX - 1 - 12 + 10).to_string());
+    }
+
+    #[test]
+    fn test_multiplicaiton() {
+
+        let v = [u64::MAX,u64::MAX-2,u64::MAX-3,u64::MAX-4];
+        let _v2 = [1u64,2,3,4];
+        let a0: DynBigUint<StandardMul> = DynBigUint::new_with_slice(&v);
+        let a1: DynBigUint<Karatsuba> = DynBigUint::new_with_slice(&v);
+        let b0: DynBigUint<StandardMul> = DynBigUint::new_with_slice(&v);
+        let b1: DynBigUint<Karatsuba> = DynBigUint::new_with_slice(&v);
+        let result0 = &a0 * &b0;
+        let result1 = &a1 * &b1;
+        assert_eq!(result0.values,result1.values);
+    }
+
+
+
+
+
+
+
 }

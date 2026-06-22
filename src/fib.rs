@@ -8,7 +8,7 @@ pub trait FibNum: Add<Output = Self> + Clone {
 pub trait FibNumInplace: FibNum + for<'a> AddAssign<&'a Self> {}
 
 #[allow(dead_code)]
-fn fib_recursive(n: u32) -> u128 {
+pub fn fib_recursive(n: u32) -> u128 {
     match n {
         0 => 0,
         1 => 1,
@@ -240,11 +240,8 @@ impl FibNum for u64 {
 #[cfg(test)]
 mod tests {
     use crate::biguint::BigUint;
-    use crate::dynbiguint::DynBigUint;
-    use crate::fib::{
-        FibNum, fib_advance_by_matrix_mult, fib_advance_by_matrix_mult_fast_2,
-        fib_inplace_two_values, fib_matrix_mult, fib_two_values,
-    };
+    use crate::dynbiguint::{DynBigUint, Karatsuba, UnrolledMul};
+    use crate::fib::{FibNum, fib_advance_by_matrix_mult, fib_advance_by_matrix_mult_fast_2, fib_inplace_two_values, fib_matrix_mult, fib_two_values, fib_matrix_mult_2};
     use crate::optbiguint::OptBigUint;
 
     #[test]
@@ -292,7 +289,7 @@ mod tests {
         }
 
         let n = 1_000_000;
-        let n = 10_000;
+        let n = 510_000;
         let now = std::time::Instant::now();
         let x = fib_two_values::<DynBigUint>(n);
         println!(
@@ -310,6 +307,22 @@ mod tests {
         );
 
         assert_eq!(x.to_string(), y.to_string());
+    }
+
+    #[test]
+    fn test_matmult_intense() {
+        let now = std::time::Instant::now();
+        let mut x = fib_matrix_mult::<DynBigUint>(10_000_000);
+        for n in (100_000..1_000_000).step_by(11) {
+
+            let y = fib_matrix_mult::<DynBigUint>(n);
+            x = x + y;
+        }
+        println!(
+            "fib_matrix_mult({}) took\t {:15} ns",
+            x.len(),
+            now.elapsed().as_nanos()
+        );
     }
 
     #[test]
@@ -356,7 +369,32 @@ mod tests {
     }
 
     #[test]
+    fn test_kat_fib() {
+        let mut n = 1_000_00;
+        while n < 2_000_000 {
+            let now = std::time::Instant::now();
+            let x = fib_matrix_mult_2::<DynBigUint<UnrolledMul>>(n);
+            println!(
+                "standard: fib_matrix_mult({}) took\t {:15} ms",
+                n,
+                now.elapsed().as_millis()
+            );
+
+            let now = std::time::Instant::now();
+            let y = fib_matrix_mult_2::<DynBigUint<Karatsuba>>(n);
+            println!(
+                "karatuba: fib_matrix_mult({}) took\t {:15} ms",
+                n,
+                now.elapsed().as_millis()
+            );
+            n = n << 1;// - n >> 1;
+            assert_eq!(x.to_string(), y.to_string());
+        }
+    }
+
+    #[test]
     fn test_optbiguint_fib_700000() {
+        let now = std::time::Instant::now();
         let x = fib_two_values::<OptBigUint>(700_000);
         let y = fib_two_values::<DynBigUint>(700_000);
         assert_eq!(x.to_string(), y.to_string());
