@@ -240,11 +240,8 @@ impl FibNum for u64 {
 #[cfg(test)]
 mod tests {
     use crate::biguint::BigUint;
-    use crate::dynbiguint::DynBigUint;
-    use crate::fib::{
-        FibNum, fib_advance_by_matrix_mult, fib_advance_by_matrix_mult_fast_2,
-        fib_inplace_two_values, fib_matrix_mult, fib_two_values,
-    };
+    use crate::dynbiguint::{DynBigUint, FFT};
+    use crate::fib::{FibNum, fib_advance_by_matrix_mult, fib_advance_by_matrix_mult_fast_2, fib_inplace_two_values, fib_matrix_mult, fib_two_values, fib_matrix_mult_2};
     use crate::optbiguint::OptBigUint;
 
     #[test]
@@ -305,6 +302,48 @@ mod tests {
         let y = fib_matrix_mult::<DynBigUint>(n);
         println!(
             "fib_matrix_mult({}) took\t {:15} ms",
+            n,
+            now.elapsed().as_millis()
+        );
+
+        assert_eq!(x.to_string(), y.to_string());
+    }
+
+    #[test]
+    fn test_matmult_fft() {
+        for n in (100_000..1_000_000).step_by(100_000) {
+            let now = std::time::Instant::now();
+            let y = fib_matrix_mult_2::<DynBigUint<FFT>>(n);
+            println!(
+                "fib_two_values({})  took\t {:15} ns",
+                n,
+                now.elapsed().as_nanos()
+            );
+
+            let now = std::time::Instant::now();
+            let x = fib_matrix_mult_2::<DynBigUint>(n);
+            println!(
+                "fib_matrix_mult({}) took\t {:15} ns",
+                n,
+                now.elapsed().as_nanos()
+            );
+
+            assert_eq!(x.to_string(), y.to_string());
+        }
+
+        let n = 1_000_000;
+        let now = std::time::Instant::now();
+        let x = fib_matrix_mult_2::<DynBigUint>(n);
+        println!(
+            "Unrolled({})  took\t {:15} ms",
+            n,
+            now.elapsed().as_millis()
+        );
+
+        let now = std::time::Instant::now();
+        let y = fib_matrix_mult_2::<DynBigUint<FFT>>(n);
+        println!(
+            "FFT    ({}) took\t {:15} ms",
             n,
             now.elapsed().as_millis()
         );
