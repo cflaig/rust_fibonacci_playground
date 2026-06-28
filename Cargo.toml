@@ -6,4 +6,8 @@ edition = "2024"
 [dependencies]
 plotters = "0.3"
 plotters-bitmap = "0.3"
+num-traits = "0.2.19"
+
+[dev-dependencies]
+rand = "0.9"
 

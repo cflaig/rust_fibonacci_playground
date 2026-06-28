@@ -240,7 +240,7 @@ impl FibNum for u64 {
 #[cfg(test)]
 mod tests {
     use crate::biguint::BigUint;
-    use crate::dynbiguint::{DynBigUint, Karatsuba, UnrolledMul};
+    use crate::dynbiguint::{DynBigUint, FFT, Karatsuba, UnrolledMul};
     use crate::fib::{FibNum, fib_advance_by_matrix_mult, fib_advance_by_matrix_mult_fast_2, fib_inplace_two_values, fib_matrix_mult, fib_two_values, fib_matrix_mult_2};
     use crate::optbiguint::OptBigUint;
 
@@ -398,5 +398,105 @@ mod tests {
         let x = fib_two_values::<OptBigUint>(700_000);
         let y = fib_two_values::<DynBigUint>(700_000);
         assert_eq!(x.to_string(), y.to_string());
+    }
+
+    #[test]
+    #[ignore = "finds FFT f64 precision boundary with real Fibonacci numbers (hours)"]
+    fn test_fib_fft_precision_boundary() {
+        use std::time::Instant;
+
+        fn compute_both(n: u32) -> (bool, usize, std::time::Duration, std::time::Duration) {
+            let t0 = Instant::now();
+            let kara = fib_matrix_mult_2::<DynBigUint<Karatsuba>>(n);
+            let t_k = t0.elapsed();
+            let t1 = Instant::now();
+            let fft = fib_matrix_mult_2::<DynBigUint<FFT>>(n);
+            let t_f = t1.elapsed();
+            (kara.limbs() == fft.limbs(), kara.limbs().len(), t_k, t_f)
+        }
+
+        fn print_row(n: u32, limbs: usize, t_k: std::time::Duration, t_f: std::time::Duration, ok: bool) {
+            println!(
+                "{:>12} | {:>10} | {:>12.1} | {:>12.1} | {}",
+                n, limbs,
+                t_k.as_secs_f64() * 1000.0,
+                t_f.as_secs_f64() * 1000.0,
+                if ok { "OK  " } else { "FAIL" }
+            );
+        }
+
+        fn print_header() {
+            println!(
+                "{:>12} | {:>10} | {:>12} | {:>12} | {}",
+                "fib(n)", "limbs", "kara (ms)", "fft  (ms)", "fft ok?"
+            );
+            println!("{}", "-".repeat(65));
+        }
+
+        println!();
+        print_header();
+
+        // Phase 1: exponential search; lo is always a verified-OK index
+        let mut lo = 0u32;
+        let mut hi = 0u32;
+        let mut n = 1_000_000u32;
+        let mut failure_found = false;
+
+        loop {
+            let (ok, limbs, t_k, t_f) = compute_both(n);
+            print_row(n, limbs, t_k, t_f, ok);
+
+            if !ok {
+                hi = n;
+                failure_found = true;
+                break;
+            }
+            lo = n;
+            if n >= 200_000_000 {
+                break;
+            }
+            n *= 2;
+        }
+
+        if !failure_found {
+            println!("\nNo precision failure found up to fib({n}).");
+            return;
+        }
+
+        // Phase 2: bisection inside (lo, hi)
+        println!("\nBisection [fib({lo}), fib({hi})]:");
+        print_header();
+
+        while hi - lo > 1 {
+            let mid = lo + (hi - lo) / 2;
+            let (ok, limbs, t_k, t_f) = compute_both(mid);
+            print_row(mid, limbs, t_k, t_f, ok);
+            if ok { lo = mid; } else { hi = mid; }
+        }
+
+        println!("\nPrecision boundary:  fib({lo}) OK,  fib({hi}) FAIL");
+    }
+
+    #[test]
+    #[ignore = "long-running benchmark (~minutes)"]
+    fn test_fib_10m_karatsuba_vs_fft() {
+        //const N: u32 = 6_041_564;
+        const N: u32 = 20_000_000;
+
+        let now = std::time::Instant::now();
+        let kara = fib_matrix_mult_2::<DynBigUint<Karatsuba>>(N);
+        let kara_ms = now.elapsed().as_millis();
+        println!("Karatsuba: fib({N}) took {kara_ms:>8} ms  ({} limbs)", kara.limbs().len());
+
+        let now = std::time::Instant::now();
+        let fft = fib_matrix_mult_2::<DynBigUint<FFT>>(N);
+        let fft_ms = now.elapsed().as_millis();
+        println!("FFT:       fib({N}) took {fft_ms:>8} ms  ({} limbs)", fft.limbs().len());
+
+        assert_eq!(
+            kara.limbs(),
+            fft.limbs(),
+            "Karatsuba and FFT produced different results for fib({N})"
+        );
     }
 }
